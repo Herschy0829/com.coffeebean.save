@@ -1,0 +1,23 @@
+{
+  "name": "com.coffeebean.save",
+  "version": "0.1.0",
+  "displayName": "CoffeeBean Save",
+  "description": "Save system module for the CoffeeBean framework: MemoryPack-based binary serialization (pluggable ISaveSerializer, JSON fallback), AES encryption, atomic write with crash-safe rollback, auto-save with throttling, version migration. Depends on com.coffeebean.tools and com.cysharp.memorypack.",
+  "unity": "6000.0",
+  "author": {
+    "name": "Herschy0829"
+  },
+  "keywords": ["coffeebean", "save", "serialization", "memorypack"],
+  "dependencies": {
+    "com.coffeebean.tools": "0.5.0",
+    "com.cysharp.memorypack": "1.21.4"
+  },
+  "testables": ["com.coffeebean.save"],
+  "samples": [
+    {
+      "displayName": "Save Demo",
+      "description": "存档模块示例：保存/读取（MemoryPack）、AES 加密、自动存档、版本迁移演示。",
+      "path": "Samples~/SaveDemo"
+    }
+  ]
+}

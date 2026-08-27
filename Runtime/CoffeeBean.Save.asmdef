@@ -1,0 +1,19 @@
+{
+  "name": "CoffeeBean.Save",
+  "rootNamespace": "CoffeeBean",
+  "references": [
+    "CoffeeBean.Tools",
+    "MemoryPack.Unity"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "MemoryPack.Core.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

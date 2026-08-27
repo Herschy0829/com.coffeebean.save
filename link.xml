@@ -1,0 +1,7 @@
+# ===== CoffeeBean.Save 代码裁剪保护 =====
+# MemoryPack 生成器产物与反射使用的类型需要保留（IL2CPP 裁剪防护）。
+<linker>
+  <assembly fullname="CoffeeBean.Save" preserve="all" />
+  <assembly fullname="MemoryPack" preserve="all" />
+  <assembly fullname="MemoryPack.Core" preserve="all" />
+</linker>

@@ -1,0 +1,25 @@
+{
+  "name": "CoffeeBean.Save.Tests",
+  "rootNamespace": "CoffeeBean.Save.Tests",
+  "references": [
+    "CoffeeBean.Save",
+    "CoffeeBean.Tools",
+    "MemoryPack.Unity"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "MemoryPack.Core.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

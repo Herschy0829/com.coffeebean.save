@@ -1,0 +1,17 @@
+{
+  "name": "CoffeeBean.Save.Demo",
+  "rootNamespace": "CoffeeBean.Save.Demo",
+  "references": [
+    "CoffeeBean.Save",
+    "MemoryPack.Unity"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
