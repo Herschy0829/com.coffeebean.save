@@ -11,7 +11,7 @@ CoffeeBean 框架的存档模块：**MemoryPack 二进制序列化**（可插拔
 ```json
 {
   "dependencies": {
-    "com.coffeebean.save": "https://github.com/Herschy0829/com.coffeebean.save.git#v0.1.0",
+    "com.coffeebean.save": "https://github.com/Herschy0829/com.coffeebean.save.git#v0.1.1",
     "com.coffeebean.tools": "https://github.com/Herschy0829/com.coffeebean.tools.git#v0.5.0",
     "com.cysharp.memorypack": "https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack"  // 或本地副本
   }
@@ -62,7 +62,9 @@ save.SetMigrator<PlayerData>((oldVersion, data) =>
 - **原子写**：tmp → 旧档转 .bak → tmp 转正（崩溃不损坏旧档）
 - **损坏回退**：主档读/解码失败自动回退备份档
 - **串行异步写**：后台单任务"最新优先"，修复静态字段竞态
-- **自动存档节流**：`SaveDataAuto` 距上次自动写不足间隔跳过；`CSaveAutoSaveHook` 定时 + 失焦/退出
+- **自动存档节流**：`SaveDataAuto` 距上次自动写不足间隔跳过；`CSaveAutoSaveHook` 定时 + 失焦/退出；
+  失焦/退出走 `SaveDataAutoImmediate`（忽略节流并阻塞到落盘），避免最后一次存档丢失
+- **`Flush()`**：阻塞到队列真正排空，退出前/测试断言前可调用
 - **版本迁移**：文件头 version + MemoryPack VersionTolerant + `SetMigrator` 钩子
 - **安全边界**：AES key 硬编码在客户端 = 混淆级（防普通读取），真安全需服务器校验
 

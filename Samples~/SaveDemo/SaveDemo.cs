@@ -46,6 +46,7 @@ namespace CoffeeBean.Save.Demo
         private void OnDestroy()
         {
             _save.SaveData(_player); // 退出前保存
+            _save.Flush();           // 阻塞到落盘：只入队不等的话，进程可能在写盘完成前结束
         }
 
         private void OnGUI()

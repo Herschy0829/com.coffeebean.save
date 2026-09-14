@@ -29,6 +29,15 @@ namespace CoffeeBean
         private byte[] _pendingPayload;
         private string _pendingSlot;
         private bool _writeQueued;
+
+        /// <summary>
+        /// 写盘循环是否在运行。必须与 <see cref="_writeQueued"/> 在同一把锁内维护：
+        /// 早期实现靠 `_writer.IsCompleted` 判断"要不要起新任务"，而委托返回与
+        /// Task 标记完成之间存在窗口 —— 落在窗口里的入队会既不起新任务、又赶上循环退出，
+        /// 该次写入就被静默丢掉（退出时丢档的元凶之一）。
+        /// </summary>
+        private bool _writerRunning;
+
         private Task _writer;
         private Action<int, object> _migrator;
         private long _lastAutoWriteTicks;
@@ -65,17 +74,34 @@ namespace CoffeeBean
         /// 自动档保存（写 `{Slot}_auto.sav`）：带节流——距上次自动写不足
         /// <see cref="CSaveOptions.AutoSaveMinInterval"/> 秒则跳过并返回 false。
         /// </summary>
-        public bool SaveDataAuto<T>(T data)
+        /// <param name="force">
+        /// true 时忽略节流，强制写入（用于失焦/退出等"必须落盘"的时机）。
+        /// 仍受自动存档总开关 <see cref="CSaveOptions.AutoSaveInterval"/> 约束（&lt;=0 视为关闭）。
+        /// </param>
+        public bool SaveDataAuto<T>(T data, bool force = false)
         {
             if (_options.AutoSaveInterval <= 0f) return false; // 自动存档关闭
             long now = DateTime.UtcNow.Ticks;
-            if (_options.AutoSaveMinInterval > 0f
+            if (!force && _options.AutoSaveMinInterval > 0f
                 && now - _lastAutoWriteTicks < (long)(_options.AutoSaveMinInterval * TimeSpan.TicksPerSecond))
                 return false; // 节流跳过
 
             SaveData(data, _options.Slot + "_auto");
             _lastAutoWriteTicks = now;
             return true;
+        }
+
+        /// <summary>
+        /// 立即写自动档并**阻塞到落盘完成**：忽略节流，且等待后台写盘结束。
+        /// 用于失焦（移动端随时可能被系统杀死）与应用退出 —— 只入队不等待的话，
+        /// 进程可能在后台线程真正写盘前就结束了，最后一次存档就丢了。
+        /// 写盘跑在线程池、不依赖主线程，因此主线程调用可安全等待。
+        /// </summary>
+        public bool SaveDataAutoImmediate<T>(T data)
+        {
+            bool saved = SaveDataAuto(data, force: true);
+            if (saved) Flush();
+            return saved;
         }
 
         /// <summary>读取存档（主线程；主档失败自动回退备份档；版本低于当前时迁移并写回）。</summary>
@@ -105,27 +131,46 @@ namespace CoffeeBean
             return default;
         }
 
-        /// <summary>删除槽位文件（含备份与自动档）。</summary>
+        /// <summary>删除槽位文件（含备份、自动档与崩溃残留的 .tmp）。</summary>
         public void DeleteSlot(string slot = null)
         {
             string name = slot ?? _options.Slot;
             DeleteIfExists(name + ".sav");
             DeleteIfExists(name + ".sav.bak");
+            DeleteIfExists(name + ".sav.tmp");
             DeleteIfExists(name + "_auto.sav");
+            // 早期实现漏删自动档的备份：删除槽位后 {Slot}_auto.sav.bak 会残留，
+            // 若之后 LoadData 走备份回退路径，可能读回本该已删除的旧档。
+            DeleteIfExists(name + "_auto.sav.bak");
+            DeleteIfExists(name + "_auto.sav.tmp");
         }
 
         /// <summary>
         /// 阻塞等待所有已排队的写盘完成（测试断言前 / 退出前调用；主线程可用）。
         /// 写盘在后台线程池执行，不依赖 Unity 主线程，故可安全 Wait。
+        /// 循环等待直到队列清空且写盘循环停止 —— 单次 Wait 可能只等到旧任务，
+        /// 而等待期间新入队的写入会由新任务承接。
         /// </summary>
         public void Flush()
         {
-            Task writer;
-            lock (_lock) { writer = _writer; }
-            try { writer?.Wait(); }
-            catch (AggregateException e)
+            while (true)
             {
-                CLog.Error(Tag, $"Flush 等待写盘异常: {e.InnerException?.Message ?? e.Message}");
+                Task writer;
+                lock (_lock)
+                {
+                    if (!_writeQueued && !_writerRunning) return;
+                    writer = _writer;
+                }
+
+                try
+                {
+                    writer?.Wait();
+                }
+                catch (AggregateException e)
+                {
+                    CLog.Error(Tag, $"Flush 等待写盘异常: {e.InnerException?.Message ?? e.Message}");
+                    return;
+                }
             }
         }
 
@@ -179,8 +224,13 @@ namespace CoffeeBean
                 _pendingSlot = slot;
                 _pendingPayload = payload;
                 _writeQueued = true;
-                if (_writer == null || _writer.IsCompleted)
+                // 用 _writerRunning（循环自己在同一把锁内置/清）而不是 _writer.IsCompleted 判断，
+                // 否则委托返回与 Task 完成之间的窗口会丢掉这次写入。
+                if (!_writerRunning)
+                {
+                    _writerRunning = true;
                     _writer = Task.Run(WriteLoop);
+                }
             }
         }
 
@@ -192,7 +242,13 @@ namespace CoffeeBean
                 byte[] payload;
                 lock (_lock)
                 {
-                    if (!_writeQueued) return;
+                    if (!_writeQueued)
+                    {
+                        // 清标志与"检查队列"必须原子：否则入队方可能看到 running=true
+                        // 而循环已经决定退出，写入被丢。
+                        _writerRunning = false;
+                        return;
+                    }
                     _writeQueued = false;
                     slot = _pendingSlot;
                     payload = _pendingPayload;

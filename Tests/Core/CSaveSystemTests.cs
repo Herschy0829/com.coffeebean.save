@@ -188,6 +188,104 @@ namespace CoffeeBean.Save.Tests
             Assert.AreEqual(4, restored.Level);
         }
 
+        [Test]
+        public void SaveDataAuto_Force_IgnoresThrottle()
+        {
+            var save = new CSaveSystem(new CSaveOptions
+            {
+                SaveDirectory = _dir,
+                Slot = "main",
+                EncryptionKey = null,
+                AutoSaveInterval = 120f,
+                AutoSaveMinInterval = 60f,
+            });
+
+            Assert.IsTrue(save.SaveDataAuto(new SaveTestData { Level = 1 }));
+            save.Flush();
+            Assert.IsFalse(save.SaveDataAuto(new SaveTestData { Level = 2 }), "节流窗口内应跳过");
+            Assert.IsTrue(save.SaveDataAuto(new SaveTestData { Level = 2 }, force: true), "force 应忽略节流");
+            save.Flush();
+
+            Assert.AreEqual(2, save.LoadData<SaveTestData>("main_auto").Level);
+        }
+
+        [Test]
+        public void SaveDataAutoImmediate_PersistsWithoutManualFlush()
+        {
+            var save = new CSaveSystem(new CSaveOptions
+            {
+                SaveDirectory = _dir,
+                Slot = "main",
+                EncryptionKey = null,
+                AutoSaveInterval = 120f,
+                AutoSaveMinInterval = 60f,
+            });
+
+            Assert.IsTrue(save.SaveDataAuto(new SaveTestData { Level = 1 }));
+            save.Flush();
+            Assert.IsFalse(save.SaveDataAuto(new SaveTestData { Level = 2 }), "节流窗口内应跳过");
+
+            // 回归点：失焦/退出路径此前用的是节流版 SaveDataAuto 且不 Flush ——
+            // 既可能被节流直接跳过，也可能只入队而在后台写盘完成前进程就结束了。
+            Assert.IsTrue(save.SaveDataAutoImmediate(new SaveTestData { Level = 3 }));
+
+            // 刻意不再调用 Flush：立即版必须已经阻塞到落盘
+            SaveTestData restored = save.LoadData<SaveTestData>("main_auto");
+            Assert.IsNotNull(restored);
+            Assert.AreEqual(3, restored.Level, "立即版应在返回前把最新数据落盘");
+        }
+
+        [Test]
+        public void SaveDataAutoImmediate_RespectsMasterSwitch()
+        {
+            var save = new CSaveSystem(new CSaveOptions
+            {
+                SaveDirectory = _dir,
+                Slot = "main",
+                AutoSaveInterval = 0f, // 自动存档总开关关闭
+                EncryptionKey = null,
+            });
+
+            Assert.IsFalse(save.SaveDataAutoImmediate(new SaveTestData { Level = 1 }),
+                "总开关关闭时立即版也不应写入（业务应自行 SaveData + Flush）");
+            Assert.IsFalse(File.Exists(Path.Combine(_dir, "main_auto.sav")));
+        }
+
+        [Test]
+        public void DeleteSlot_RemovesAutoBackupAndTmpLeftovers()
+        {
+            var save = CreateSave();
+            save.SaveData(new SaveTestData { Level = 1 });
+            WaitForWrite(save);
+
+            // 手工造出自动档备份与崩溃残留 tmp
+            File.WriteAllBytes(Path.Combine(_dir, "main_auto.sav"), new byte[] { 1 });
+            File.WriteAllBytes(Path.Combine(_dir, "main_auto.sav.bak"), new byte[] { 1 });
+            File.WriteAllBytes(Path.Combine(_dir, "main.sav.tmp"), new byte[] { 1 });
+
+            save.DeleteSlot();
+
+            Assert.IsFalse(File.Exists(Path.Combine(_dir, "main_auto.sav.bak")),
+                "自动档备份应被删除（早期实现漏删，回退读取可能读回本该删除的旧档）");
+            Assert.IsFalse(File.Exists(Path.Combine(_dir, "main.sav.tmp")), "崩溃残留 tmp 应被删除");
+            Assert.IsFalse(Directory.Exists(_dir) && Directory.GetFiles(_dir).Length > 0, "删除后目录应无文件");
+        }
+
+        [Test]
+        public void Flush_DrainsAllQueuedWrites_LastWriteWins()
+        {
+            var save = CreateSave();
+            for (int i = 1; i <= 200; i++) save.SaveData(new SaveTestData { Level = i });
+
+            // 回归点：早期 Flush 只 Wait 一次捕获到的 Task；若等待期间有新写入换了任务，
+            // 或入队恰好落在"委托已返回但 Task 未标记完成"的窗口里，这次写入会被丢掉。
+            save.Flush();
+
+            SaveTestData restored = save.LoadData<SaveTestData>();
+            Assert.IsNotNull(restored);
+            Assert.AreEqual(200, restored.Level, "Flush 返回后最后一次写入必须已落盘");
+        }
+
         private static bool ContainsBytes(byte[] data, byte[] needle)
         {
             for (int i = 0; i + needle.Length <= data.Length; i++)
