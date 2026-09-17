@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 
@@ -10,7 +11,8 @@ namespace CoffeeBean
     /// - **文件槽位**：`{SaveDirectory}/{Slot}.sav`（自动档 `{Slot}_auto.sav`），备份 `{Slot}.sav.bak`
     /// - **原子写**：tmp → 旧档转 bak → tmp 转正（崩溃任意点不损坏旧档）
     /// - **损坏回退**：主档读/解码失败自动回退备份档
-    /// - **串行异步写**：后台单任务按"最新优先"写盘（修复 BinarySerializ 静态字段互踩）
+    /// - **串行异步写**：后台单任务按"每槽位最新优先"写盘（修复 BinarySerializ 静态字段互踩）；
+    ///   不同槽位各自暂存、互不覆盖，同槽位只保留最新一份
     /// - **加密**：AES + 可选 XOR（<see cref="CSaveEncrypt"/>），文件头带 version
     /// - **版本迁移**：读档 version &lt; 当前时调 <see cref="SetMigrator{T}"/> 钩子并写回新版本
     /// - **自动存档节流**：<see cref="SaveDataAuto"/> 距上次自动写不足间隔跳过；
@@ -26,12 +28,23 @@ namespace CoffeeBean
         private readonly object _lock = new object();
         private readonly CSaveOptions _options;
 
-        private byte[] _pendingPayload;
-        private string _pendingSlot;
-        private bool _writeQueued;
+        /// <summary>
+        /// 待写槽位 → 最新载荷（**按槽位**各自「最新优先」）。
+        ///
+        /// 早期实现只有一个 `_pendingSlot`/`_pendingPayload` 信箱，第二次入队直接覆盖第一次：
+        /// 「先写 A 槽、紧接着写 B 槽」时 A 的写会被丢掉，且是否丢失取决于后台线程的调度时机
+        /// （竞态）。而模块自带的 <see cref="SaveDataAuto"/> 写的正是另一个槽位
+        /// （<c>{Slot}_auto</c>），所以 `SaveData(x)` 紧跟 `SaveDataAuto(x)` 就可能静默漏写一次自动档。
+        /// 改为按槽位分别暂存后：不同槽位互不覆盖，同槽位仍然只保留最新一份（保留原「最新优先」语义）。
+        /// </summary>
+        private readonly Dictionary<string, byte[]> _pendingPayloads =
+            new Dictionary<string, byte[]>(StringComparer.Ordinal);
+
+        /// <summary>脏槽位的入队顺序：先入队的先写，同槽位重复入队不重复排队。</summary>
+        private readonly List<string> _dirtySlots = new List<string>();
 
         /// <summary>
-        /// 写盘循环是否在运行。必须与 <see cref="_writeQueued"/> 在同一把锁内维护：
+        /// 写盘循环是否在运行。必须与待写队列在同一把锁内维护：
         /// 早期实现靠 `_writer.IsCompleted` 判断"要不要起新任务"，而委托返回与
         /// Task 标记完成之间存在窗口 —— 落在窗口里的入队会既不起新任务、又赶上循环退出，
         /// 该次写入就被静默丢掉（退出时丢档的元凶之一）。
@@ -158,7 +171,7 @@ namespace CoffeeBean
                 Task writer;
                 lock (_lock)
                 {
-                    if (!_writeQueued && !_writerRunning) return;
+                    if (_dirtySlots.Count == 0 && !_writerRunning) return;
                     writer = _writer;
                 }
 
@@ -221,9 +234,10 @@ namespace CoffeeBean
         {
             lock (_lock)
             {
-                _pendingSlot = slot;
-                _pendingPayload = payload;
-                _writeQueued = true;
+                // 同槽位只保留最新一份；不同槽位各占一格，不会被彼此覆盖
+                if (!_pendingPayloads.ContainsKey(slot)) _dirtySlots.Add(slot);
+                _pendingPayloads[slot] = payload;
+
                 // 用 _writerRunning（循环自己在同一把锁内置/清）而不是 _writer.IsCompleted 判断，
                 // 否则委托返回与 Task 完成之间的窗口会丢掉这次写入。
                 if (!_writerRunning)
@@ -242,16 +256,17 @@ namespace CoffeeBean
                 byte[] payload;
                 lock (_lock)
                 {
-                    if (!_writeQueued)
+                    if (_dirtySlots.Count == 0)
                     {
                         // 清标志与"检查队列"必须原子：否则入队方可能看到 running=true
                         // 而循环已经决定退出，写入被丢。
                         _writerRunning = false;
                         return;
                     }
-                    _writeQueued = false;
-                    slot = _pendingSlot;
-                    payload = _pendingPayload;
+                    slot = _dirtySlots[0];
+                    _dirtySlots.RemoveAt(0);
+                    payload = _pendingPayloads[slot];
+                    _pendingPayloads.Remove(slot);
                 }
                 AtomicWrite(slot, payload);
             }

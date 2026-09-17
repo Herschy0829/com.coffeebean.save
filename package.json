@@ -1,6 +1,6 @@
 {
   "name": "com.coffeebean.save",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "displayName": "CoffeeBean Save",
   "description": "Save system module for the CoffeeBean framework: MemoryPack-based binary serialization (pluggable ISaveSerializer, JSON fallback), AES encryption, atomic write with crash-safe rollback, auto-save with throttling, version migration. Depends on com.coffeebean.tools and com.cysharp.memorypack.",
   "unity": "6000.0",

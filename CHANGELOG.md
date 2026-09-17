@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.4.0] - 2026-09-17
+
+### Fixed
+- **多槽位写入会被静默丢弃（竞态）**。后台写盘原先只有**一个**待写信箱
+  （`_pendingSlot` / `_pendingPayload`），第二次 `EnqueueWrite` 直接覆盖第一次 ——
+  于是「先写 A 槽、紧接着写 B 槽」时 A 的那次写就没了，而且**丢不丢取决于后台线程的调度时机**，
+  属于竞态：同一段代码可能这次正常、下次丢档。
+  本模块自带的 `SaveDataAuto` 写的正是另一个槽位（`{Slot}_auto`），
+  所以 `SaveData(x)` 紧跟 `SaveDataAuto(x)` 就是这条缺陷的真实触发路径。
+
+  实测复现（修复前）：连续 `SaveData(a, "slotA")` + `SaveData(b, "slotB")` 后 `Flush()`，
+  `slotA.sav` 根本没有生成、`LoadData("slotA")` 返回 null，只有 `slotB.sav` 落盘。
+
+  修法：待写队列改为**按槽位**分别暂存（`Dictionary<string, byte[]>` + 脏槽位入队顺序表）。
+  - **不同槽位互不覆盖** —— 每个槽位的写都会落盘；
+  - **同槽位仍然只保留最新一份**，保留原「最新优先」语义与省 IO 的收益；
+  - 写入顺序按首次入队先后（FIFO），便于推理与测试；
+  - `Flush()` 的判空条件同步改为「脏槽位为空且写盘循环已停」，语义与原来一致。
+
+  对单槽位使用者（绝大多数）行为不变，无 API 变更、无存档格式变更 —— 升级即修复。
+
+### Tests
+- 新增 4 个回归用例：`SaveData_TwoDifferentSlots_NeitherWriteIsDropped`、
+  `SaveData_ThenSaveDataAuto_BothSlotsPersisted`、
+  `SaveData_ManyInterleavedSlots_AllPersisted`（5 槽 × 4 轮交错入队且中途不 Flush）、
+  `SaveData_SameSlotRepeated_KeepsLatestOnly`（确认同槽位「最新优先」语义未被破坏）。
+- 已验证这些用例**确实能抓到旧缺陷**：把旧实现临时放回去后，
+  `SaveData_ManyInterleavedSlots_AllPersisted` 稳定失败（22/23）。
+  单轮两槽那条因竞态有时会侥幸通过，故交错的这条是可靠的回归守卫。
+
 ## [0.3.0] - 2026-09-17
 
 ### Added

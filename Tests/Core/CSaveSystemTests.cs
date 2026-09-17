@@ -286,6 +286,94 @@ namespace CoffeeBean.Save.Tests
             Assert.AreEqual(200, restored.Level, "Flush 返回后最后一次写入必须已落盘");
         }
 
+        // ========== 多槽位写入不被丢弃（回归） ==========
+
+        /// <summary>
+        /// 回归点：早期实现的后台写盘只有一个 `_pendingSlot/_pendingPayload` 信箱，
+        /// 第二次入队直接覆盖第一次 —— "先写 A 槽、紧接着写 B 槽"会让 A 的写被静默丢掉，
+        /// 且丢失与否取决于后台线程调度时机（竞态）。
+        /// </summary>
+        [Test]
+        public void SaveData_TwoDifferentSlots_NeitherWriteIsDropped()
+        {
+            var save = CreateSave();
+
+            save.SaveData(new SaveTestData { Level = 111 }, "slotA");
+            save.SaveData(new SaveTestData { Level = 222 }, "slotB");
+            save.Flush();
+
+            Assert.IsTrue(File.Exists(Path.Combine(_dir, "slotA.sav")), "slotA 的写被丢弃了");
+            Assert.IsTrue(File.Exists(Path.Combine(_dir, "slotB.sav")), "slotB 的写被丢弃了");
+
+            SaveTestData a = save.LoadData<SaveTestData>("slotA");
+            SaveTestData b = save.LoadData<SaveTestData>("slotB");
+            Assert.IsNotNull(a);
+            Assert.IsNotNull(b);
+            Assert.AreEqual(111, a.Level);
+            Assert.AreEqual(222, b.Level);
+        }
+
+        /// <summary>
+        /// 模块自带的 SaveDataAuto 写的正是另一个槽位（{Slot}_auto），
+        /// 所以"显式档紧跟自动档"是这条缺陷的真实触发路径。
+        /// </summary>
+        [Test]
+        public void SaveData_ThenSaveDataAuto_BothSlotsPersisted()
+        {
+            var save = CreateSave();
+
+            save.SaveData(new SaveTestData { Level = 333 }, "explicit");
+            save.SaveDataAuto(new SaveTestData { Level = 444 });
+            save.Flush();
+
+            Assert.IsTrue(File.Exists(Path.Combine(_dir, "explicit.sav")),
+                "显式槽位的写被随后的自动档写入覆盖丢弃");
+            Assert.IsTrue(File.Exists(Path.Combine(_dir, "main_auto.sav")), "自动档应写入 {Slot}_auto");
+
+            SaveTestData explicitData = save.LoadData<SaveTestData>("explicit");
+            SaveTestData autoData = save.LoadData<SaveTestData>("main_auto");
+            Assert.IsNotNull(explicitData);
+            Assert.IsNotNull(autoData);
+            Assert.AreEqual(333, explicitData.Level);
+            Assert.AreEqual(444, autoData.Level);
+        }
+
+        [Test]
+        public void SaveData_ManyInterleavedSlots_AllPersisted()
+        {
+            var save = CreateSave();
+            string[] slots = { "s1", "s2", "s3", "s4", "s5" };
+
+            // 交错入队且中间不 Flush：每个槽位都必须留下自己的文件（同槽位只保留最新值）
+            for (int round = 1; round <= 4; round++)
+            {
+                for (int i = 0; i < slots.Length; i++)
+                {
+                    save.SaveData(new SaveTestData { Level = round * 100 + i }, slots[i]);
+                }
+            }
+            save.Flush();
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                SaveTestData restored = save.LoadData<SaveTestData>(slots[i]);
+                Assert.IsNotNull(restored, slots[i] + " 的写被丢弃了");
+                Assert.AreEqual(400 + i, restored.Level, slots[i] + " 应保存该槽位最后一次写入的值");
+            }
+        }
+
+        [Test]
+        public void SaveData_SameSlotRepeated_KeepsLatestOnly()
+        {
+            var save = CreateSave();
+            for (int i = 1; i <= 50; i++) save.SaveData(new SaveTestData { Level = i }, "same");
+            save.Flush();
+
+            SaveTestData restored = save.LoadData<SaveTestData>("same");
+            Assert.IsNotNull(restored);
+            Assert.AreEqual(50, restored.Level, "同槽位应保持「最新优先」语义");
+        }
+
         private static bool ContainsBytes(byte[] data, byte[] needle)
         {
             for (int i = 0; i + needle.Length <= data.Length; i++)
