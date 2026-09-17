@@ -6,7 +6,7 @@ using CoffeeBean;
 
 [assembly: CoffeeBeanModule(
     "com.coffeebean.save",
-    "0.4.0",
+    "0.5.0",
     DisplayName = "Save",
     Description = "Save system: MemoryPack serialization, AES encryption, atomic write, auto-save, version migration.",
     Dependencies = new[] { "com.coffeebean.core", "com.coffeebean.tools" }

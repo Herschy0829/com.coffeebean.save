@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.5.0] - 2026-09-17
+
+### Added
+- **`BigInteger` 的 MemoryPack 格式化器**（`CBigIntegerFormatter`）与注册入口 `CSaveFormatters`。
+  字节布局与工程里历史手写的实现**完全一致**（4 字节小端长度 + `ToByteArray()`），
+  换用本模块**不会改变已写出的存档格式**。
+
+### 为什么不能直接用 MemoryPack.Core 的内建版
+MemoryPack.Core **确实**带了 `MemoryPack.Formatters.BigIntegerFormatter`，
+但**它不能用** —— NuGet 那份 DLL 把上游一条有缺陷的分支编了进去：
+
+```csharp
+#if !UNITY_2021_2_OR_NEWER
+    Span<byte> temp = stackalloc byte[255];
+    if (value.TryWriteBytes(temp, out var written))
+    {
+        writer.WriteUnmanagedSpan(temp.Slice(written));   // ← 应为 Slice(0, written)
+        return;
+    }
+#endif
+```
+
+`TryWriteBytes` 把数值写在缓冲区**开头**（`written` = 实际字节数），
+而 `Slice(written)` 取的是「跳过前 `written` 字节」之后的剩余部分 ——
+一次 13 字节的数值会被写成「长度 242 + 242 个未初始化栈字节」。
+
+该分支只在**未定义 `UNITY_2021_2_OR_NEWER`** 时参与编译：
+
+- Unity 工程编译自带源码 → 走安全的 `ToByteArray()` 分支；
+- **NuGet 的 `MemoryPack.Core.dll` 按 netstandard2.1 编译、没有 Unity 宏 → 坏路径被编进 DLL**。
+
+实测（同工程内 MemoryPack.Core 1.21.4）：
+
+| | 数值 `123456789012345678901234567890` |
+|---|---|
+| 本模块格式化器 | **17 B** = 4 字节长度(13) + `ToByteArray()`，读回正确 |
+| DLL 内建版 | **246 B** = 4 字节长度(242) + 242 个 `0x00`，且**读回 = 0**（自读不自洽） |
+
+> 这也解释了为什么接入工程往往要自己手写一份 BigInteger 格式化器 —— 不是多此一举，
+> 而是内建版在这个分发形态下确实不可用。此前 save 模块漏了它，等于把这块留给每个消费工程自己补。
+
+### Tests
+- 新增 `BigIntegerFormatterTests`（7 个用例）：0 / ±1 / ±127 / ±128 / ±超大数往返、
+  负数与零保号、`Dictionary<int, BigInteger>` 往返、`[MemoryPackable]` 类持有 BigInteger 字段往返、
+  `RegisterAll` 幂等，以及**线格式锁死**（断言「4 字节长度 + `ToByteArray()`」，
+  并断言长度 < 64 —— 一旦退回内建版会立刻从 17 B 跳到 246 B 而失败）。
+- 已验证这些用例**确实能抓到内建版**：临时把注册换成
+  `MemoryPack.Formatters.BigIntegerFormatter` 后，7 个用例里 **6 个失败**
+  （只有不碰数值的 `RegisterAll_IsIdempotent` 通过），改回本模块实现后 30/30 全绿。
+
 ## [0.4.0] - 2026-09-17
 
 ### Fixed
