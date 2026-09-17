@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.3.0] - 2026-09-17
+
+### Added
+- **内嵌 MemoryPack 二进制**（`Runtime/Plugins/MemoryPack/`）：`MemoryPack.Core.dll`（1.21.4）、
+  Roslyn 源生成器 `MemoryPack.Generator.dll`（`.meta` 带 `RoslynAnalyzer` 标签）、
+  以及 Core 在 netstandard2.1 下的依赖 `System.Collections.Immutable` / `System.Runtime.CompilerServices.Unsafe`。
+  同时附上 `THIRD-PARTY-NOTICES.md` 与各自的 MIT 许可全文（再分发要求）。
+
+  **解决的问题**：上游 `MemoryPack.Unity` 的 git 包**只给胶水层**，不含 Core 与生成器；
+  消费工程若只做 git 引用会得到 **87 条 `CS0234/CS0246`**（`MemoryPack.Internal`、`MemoryPackFormatter<>`、
+  `MemoryPackWriter<>`、`MemoryPackReader`、`PreserveAttribute` 全部找不到）。
+  此前唯一的办法是引 NuGetForUnity 或手动放 DLL（见 0.1.2 的文档说明）。
+
+  现在消费工程只需三条 manifest 依赖即可，**不需要额外编辑器工具、不需要联网还原、不需要手动放 DLL**。
+
+### ⚠️ 升级注意（破坏性使用约束）
+- **不要重复提供这些 DLL**。Unity 遇到同名预编译程序集直接报错
+  `Multiple precompiled assemblies with the same name`。
+  若你此前用 NuGetForUnity 还原或手动放过 `MemoryPack.Core.dll` / `MemoryPack.Generator.dll`，
+  **升级到本版本时必须先把它们移除**。
+- 上游 `com.cysharp.memorypack`（胶水层）仍要装，与内嵌二进制不重名，互补。
+- 内嵌二进制的 `.meta` 使用**重新生成的 GUID**，避免与既有同源副本撞 GUID。
+
+### Verified
+- 在 dev 工程把 `com.cysharp.memorypack` 换成**只有胶水层的上游 git 包**、并删除原先 vendored 的
+  完整副本（含旧 DLL）后：全量 EditMode **461/461 通过**，源生成器正常工作
+  （即 Core 与生成器确实来自本模块内嵌的那份）。
+- 过程中先复现了"生成器跑两遍"的失败（`CS0102/CS0111` 重复生成），确认了"不要重复提供"这条约束是真实生效的。
+
 ## [0.2.0] - 2026-09-17
 
 ### Added

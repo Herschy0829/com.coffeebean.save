@@ -11,38 +11,51 @@ CoffeeBean 框架的存档模块：**MemoryPack 二进制序列化**（可插拔
 ```json
 {
   "dependencies": {
-    "com.coffeebean.save": "https://github.com/Herschy0829/com.coffeebean.save.git#v0.2.0",
+    "com.coffeebean.save": "https://github.com/Herschy0829/com.coffeebean.save.git#v0.3.0",
     "com.coffeebean.tools": "https://github.com/Herschy0829/com.coffeebean.tools.git#v0.6.0",
     "com.cysharp.memorypack": "https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack.Unity/Assets/MemoryPack.Unity#1.21.4"
   }
 }
 ```
 
-### ⚠️ MemoryPack 还需要单独提供 NuGet 产物（必读）
+就这三条，**不需要 NuGetForUnity、不需要手动放任何 DLL、不需要联网还原**。
 
-**上面那条 git 引用只提供"胶水层"** —— 上游 `MemoryPack.Unity` 包内**只有** `Runtime/`（3 个文件）与 `package.json`，
-**不含** `MemoryPack.Core.dll`，也**不含** Roslyn 源生成器 `MemoryPack.Generator.dll`。
-而 `MemoryPack.Unity.asmdef` 里写着 `precompiledReferences: ["MemoryPack.Core.dll"]`，所以**必须**另外提供 NuGet 产物，二选一：
+### MemoryPack 的二进制已内嵌在本模块里
 
-| 方式 | 做法 |
-|---|---|
-| **A. NuGetForUnity（上游推荐）** | 引入 [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity)（本身也是 UPM 包），搜索 `MemoryPack` 安装 → 它会还原到 `Assets/Packages/` |
-| **B. 手动放置 NuGet 产物** | 把 `MemoryPack.Core.dll`（`lib/netstandard2.1/`）、`MemoryPack.Generator.dll`（`analyzers/dotnet/cs/`，其 `.meta` **必须**带 `RoslynAnalyzer` 标签）、以及依赖的 `System.Collections.Immutable.dll` / `System.Runtime.CompilerServices.Unsafe.dll` 放进工程（如 `Assets/Packages/`），并保留各自 `.meta` |
+上游 `MemoryPack.Unity` 的 git 包**只提供胶水层**（`Runtime/` 3 个文件 + `package.json`），
+不含 `MemoryPack.Core.dll`，也不含 Roslyn 源生成器 `MemoryPack.Generator.dll`
+（而 `MemoryPack.Unity.asmdef` 要求 `precompiledReferences: ["MemoryPack.Core.dll"]`，
+所有 `[MemoryPackable]` 类型也都依赖生成器产出格式化器）。
 
-**只做 git 引用会直接编译失败**（实测，一次 87 条错误）：
+**本模块已把这些二进制随包分发**，位于：
 
 ```
-error CS0234: 命名空间 "MemoryPack" 中不存在类型或命名空间名 "Internal"
-error CS0246: 找不到类型或命名空间名 "MemoryPackFormatter<>" / "MemoryPackWriter<>" / "MemoryPackReader" / "PreserveAttribute"
+Runtime/Plugins/MemoryPack/
+├── MemoryPack.Core.1.21.4/lib/netstandard2.1/MemoryPack.Core.dll
+├── MemoryPack.Generator.1.21.4/analyzers/dotnet/cs/MemoryPack.Generator.dll   ← .meta 带 RoslynAnalyzer 标签
+├── System.Collections.Immutable.6.0.0/...                                     ← Core 在 netstandard2.1 下的依赖
+├── System.Runtime.CompilerServices.Unsafe.6.0.0/...
+├── LICENSE-*.txt / THIRD-PARTY-NOTICES.md
 ```
 
-即 `MemoryPack.Unity` 程序集编不出来 → 引用它的 `CoffeeBean.Save` 也编不出来。
+所以消费工程只要按上面的 manifest 加依赖即可，MemoryPack 的运行时与源生成器都由框架提供。
 
-**如何确认生成器真的生效**：编译后 `Library/BuildPlayerData/Player/TypeDb-All.json` 里应能搜到
-`<你的类型>+<类型>Formatter`（例如 `PlayerData+PlayerDataFormatter`）—— 那是源生成器产出的嵌套类型，进入了程序集才说明它跑了。
+### ⚠️ 不要重复提供这些 DLL
 
-> 为什么不能把 DLL 直接塞进本模块：MemoryPack 的 Core 与生成器是 **NuGet 二进制 + 版本锁**，
-> 且生成器要作为 Roslyn analyzer 参与消费工程的编译；内嵌到 UPM 包里既会锁定版本，也拿不到正确的 analyzer 装配。故由消费工程提供。
+Unity 遇到**同名预编译程序集**会直接报错：`Multiple precompiled assemblies with the same name`。
+
+- **不要**再用 NuGetForUnity 还原 MemoryPack 到 `Assets/Packages/`
+- **不要**把 `MemoryPack.Core.dll` / `MemoryPack.Generator.dll` 从别处放进工程
+
+> 上游 `com.cysharp.memorypack`（胶水层）**仍然要装** —— 它是 UPM 包，与内嵌二进制不重名，互补关系。
+
+### 生成器是否生效的判据
+
+编译后工程内应能搜到 `<你的类型>+<类型>Formatter`（例如 `PlayerData+PlayerDataFormatter`）——
+那是源生成器产出的嵌套类型，进入程序集才说明它跑了。若 `[MemoryPackable]` 类型在运行期抛
+"formatter is not registered"，几乎都是生成器没生效（多为重复/缺失 DLL 导致）。
+
+> 升级 MemoryPack 时需同步三处：本模块内嵌的二进制、`package.json` 的依赖版本、消费工程引用的 tag。
 
 ## 快速使用
 
@@ -132,6 +145,7 @@ Runtime/
 ├── Core/        CSaveSystem / CSaveOptions / CSaveEncrypt / CSaveAutoSaveHook / ISaveSerializer
 ├── Serializers/ CMemoryPackSerializer / CJsonSerializer
 │   └── Formatters/UniRx/  可选程序集 CoffeeBean.Save.UniRx（装了 UniRx 才编译）
+├── Plugins/MemoryPack/    内嵌的 MemoryPack 二进制（Core / Generator / 依赖 + 许可声明）
 └── Bridge/      与 Core 的可选集成
 ```
 
