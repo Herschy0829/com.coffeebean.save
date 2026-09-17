@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.2.0] - 2026-09-17
+
+### Added
+- **UniRx 自定义 MemoryPack 格式化器**（可选程序集 `CoffeeBean.Save.UniRx`）：
+  `CReactivePropertyFormatter<T>`、6 个派生类型（`CInt/CLong/CBool/CFloat/CDouble/CStringReactivePropertyFormatter`）、
+  `CReactiveCollectionFormatter<T>`、`CReactiveDictionaryFormatter<TKey,TValue>`，
+  以及注册入口 `CUniRxSaveFormatters.RegisterAll()`（幂等；运行时 `RuntimeInitializeOnLoadMethod` +
+  编辑器 `InitializeOnLoadMethod` 双时机自动注册）。
+
+  **为什么框架要提供**：MemoryPack **没有** UniRx 类型的内建格式化器（实测 MemoryPack.Core 里
+  `ReactiveProperty` 相关类型为 **0** 个），而 MemoryPack 依赖 `[ModuleInitializer]` 自动注册格式化器，
+  **Unity 不支持 ModuleInitializer** —— 因此外部库类型必须手工注册，否则要到序列化时才抛
+  "formatter is not registered"。此前每个工程都得自己写一份（约 350 行），现在由框架提供。
+
+  - **可选、不强制**：该程序集用 `versionDefines` 监听 `com.neuecc.unirx`，**装了 UniRx 才编译**
+    （`defineConstraints: ["COFFEEBEAN_UNIRX"]` + `autoReferenced: false`），没装则整体跳过 ——
+    与框架既有的 Bridge 模式一致。
+  - **字节兼容**：对象头/集合头布局与既有工程手写版本**逐字节一致**，换用不会改变已写出的存档格式
+    （只替换实现，不换格式）。
+  - **不包含 `BigIntegerFormatter`**：MemoryPack.Core **已内建**
+    `MemoryPack.Formatters.BigIntegerFormatter`（本次已核实），再写一份是冗余，
+    且会因"该类型已有格式化器"导致注册失败（既有工程那份大概一直在静默失败）。
+
+### Notes
+- 需要其他元素类型的格式化器时，用 `CUniRxSaveFormatters.Register<T>(...)` 追加即可，无需改框架。
+
 ## [0.1.2] - 2026-09-17
 
 ### Fixed（**文档缺陷**：会让接入方直接编译失败）

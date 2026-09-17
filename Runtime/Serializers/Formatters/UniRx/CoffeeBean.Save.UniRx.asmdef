@@ -1,0 +1,28 @@
+{
+  "name": "CoffeeBean.Save.UniRx",
+  "rootNamespace": "CoffeeBean",
+  "references": [
+    "CoffeeBean.Tools",
+    "MemoryPack.Unity",
+    "UniRx"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "MemoryPack.Core.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "COFFEEBEAN_UNIRX"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.neuecc.unirx",
+      "expression": "",
+      "define": "COFFEEBEAN_UNIRX"
+    }
+  ],
+  "noEngineReferences": false
+}

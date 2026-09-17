@@ -11,7 +11,7 @@ CoffeeBean 框架的存档模块：**MemoryPack 二进制序列化**（可插拔
 ```json
 {
   "dependencies": {
-    "com.coffeebean.save": "https://github.com/Herschy0829/com.coffeebean.save.git#v0.1.2",
+    "com.coffeebean.save": "https://github.com/Herschy0829/com.coffeebean.save.git#v0.2.0",
     "com.coffeebean.tools": "https://github.com/Herschy0829/com.coffeebean.tools.git#v0.6.0",
     "com.cysharp.memorypack": "https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack.Unity/Assets/MemoryPack.Unity#1.21.4"
   }
@@ -91,6 +91,31 @@ save.SetMigrator<PlayerData>((oldVersion, data) =>
 - **`Flush()`**：阻塞到队列真正排空，退出前/测试断言前可调用
 - **版本迁移**：文件头 version + MemoryPack VersionTolerant + `SetMigrator` 钩子
 - **安全边界**：AES key 硬编码在客户端 = 混淆级（防普通读取），真安全需服务器校验
+- **UniRx 格式化器内置**：装了 `com.neuecc.unirx` 即自动编译并注册（见下节），无需每个工程自己写
+
+## UniRx 自定义格式化器（可选）
+
+MemoryPack **没有** UniRx 类型的内建格式化器，且它靠 `[ModuleInitializer]` 自动注册、
+**Unity 不支持 ModuleInitializer** —— 外部库类型只能手工注册，否则要等到序列化时才抛
+"formatter is not registered"。本模块已把这份实现收进框架：
+
+| 类型 | 覆盖 |
+|---|---|
+| `CReactivePropertyFormatter<T>` | 泛型 `ReactiveProperty<T>` |
+| `CInt/CLong/CBool/CFloat/CDouble/CStringReactivePropertyFormatter` | 6 个常用派生类型 |
+| `CReactiveCollectionFormatter<T>` | `ReactiveCollection<T>` |
+| `CReactiveDictionaryFormatter<TKey,TValue>` | `ReactiveDictionary<K,V>` |
+| `CUniRxSaveFormatters` | 注册入口（幂等，自动 + 可手动） |
+
+- **可选**：位于独立程序集 `CoffeeBean.Save.UniRx`，用 `versionDefines` 监听 `com.neuecc.unirx`；
+  **装了 UniRx 才编译**（`defineConstraints: ["COFFEEBEAN_UNIRX"]`），没装则整体跳过
+- **自动注册**：运行时 `RuntimeInitializeOnLoadMethod`（场景加载前）+ 编辑器 `InitializeOnLoadMethod`
+  （编辑模式不跑 RuntimeInitialize，而失焦存档在编辑器里也会触发）。需要显式确保时可调
+  `CUniRxSaveFormatters.RegisterAll()`
+- **字节兼容**：布局与手写版本一致（对象头 1 + 值 / 集合头 + 元素），换用不改变已有存档格式
+- **扩展**：需要别的元素类型时 `CUniRxSaveFormatters.Register(new CReactivePropertyFormatter<MyStruct>())`，
+  无需改框架
+- **不含 `BigIntegerFormatter`**：MemoryPack.Core 已内建 `MemoryPack.Formatters.BigIntegerFormatter`
 
 ## 文件格式
 
@@ -106,6 +131,7 @@ save.SetMigrator<PlayerData>((oldVersion, data) =>
 Runtime/
 ├── Core/        CSaveSystem / CSaveOptions / CSaveEncrypt / CSaveAutoSaveHook / ISaveSerializer
 ├── Serializers/ CMemoryPackSerializer / CJsonSerializer
+│   └── Formatters/UniRx/  可选程序集 CoffeeBean.Save.UniRx（装了 UniRx 才编译）
 └── Bridge/      与 Core 的可选集成
 ```
 
