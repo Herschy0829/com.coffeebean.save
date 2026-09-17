@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.1.2] - 2026-09-17
+
+### Fixed（**文档缺陷**：会让接入方直接编译失败）
+- **README 的 MemoryPack git 引用路径是错的**：原文写 `?path=src/MemoryPack`，那并不是 Unity 包
+  （Unity 包在 `src/MemoryPack.Unity/Assets/MemoryPack.Unity`）。照抄会解析出错误的内容。
+- **README 未说明 MemoryPack 还必须单独提供 NuGet 产物**（本次在真实工程接入时暴露）：
+  上游 `MemoryPack.Unity` 包内**只有**胶水层（`Runtime/` 3 个文件 + `package.json`），
+  既没有 `MemoryPack.Core.dll`，也没有 Roslyn 源生成器 `MemoryPack.Generator.dll`；
+  而 `MemoryPack.Unity.asmdef` 要求 `precompiledReferences: ["MemoryPack.Core.dll"]`。
+
+  只做 git 引用会在消费工程产生 **87 条编译错误**（`CS0234` 命名空间 `MemoryPack.Internal` 不存在、
+  `CS0246` 找不到 `MemoryPackFormatter<>` / `MemoryPackWriter<>` / `MemoryPackReader` / `PreserveAttribute`），
+  导致 `MemoryPack.Unity` 程序集编不出来，进而 `CoffeeBean.Save` 也编不出来。
+
+  现已补上完整的两种供给方式（**NuGetForUnity** 还原 / **手动放置** NuGet 产物到 `Assets/Packages/`，
+  生成器 `.meta` 必须带 `RoslynAnalyzer` 标签），并给出「如何确认源生成器真的生效」的判据：
+  编译后 `Library/BuildPlayerData/Player/TypeDb-All.json` 里应能搜到 `<类型>+<类型>Formatter`
+  （例如 `PlayerData+PlayerDataFormatter`）。
+- README 安装示例中 `com.coffeebean.tools` 的 pin 由过期的 `v0.5.0` 修正为 `v0.6.0`。
+
+### Notes
+- 本版本**只改文档，无代码变更**。之所以照常发版：这类文档缺陷会让接入方直接踩坑，
+  发版后 Hub 才能把新版本推给已接入的工程。
+- 同步修正 `docs/design-save.md` 里"来源由消费工程决定"这一过于笼统的表述。
+
+### Verified（真实工程接入实测）
+- 在 IdleMedievalLife（Unity 6000.0.71f1）以 **git 依赖**装入 `com.coffeebean.core` / `com.coffeebean.tools` /
+  `com.coffeebean.save`：三者均编译成功（`CoffeeBean.Core.dll` / `CoffeeBean.Tools.dll` / `CoffeeBean.Save.dll`
+  及 `CoffeeBean.Save.Bridge.dll`），MemoryPack 源生成器确认生效（产出 `PlayerData+PlayerDataFormatter`）。
+
 ## [0.1.1] - 2026-09-14
 
 ### Fixed

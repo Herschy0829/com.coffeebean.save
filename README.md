@@ -11,14 +11,38 @@ CoffeeBean 框架的存档模块：**MemoryPack 二进制序列化**（可插拔
 ```json
 {
   "dependencies": {
-    "com.coffeebean.save": "https://github.com/Herschy0829/com.coffeebean.save.git#v0.1.1",
-    "com.coffeebean.tools": "https://github.com/Herschy0829/com.coffeebean.tools.git#v0.5.0",
-    "com.cysharp.memorypack": "https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack"  // 或本地副本
+    "com.coffeebean.save": "https://github.com/Herschy0829/com.coffeebean.save.git#v0.1.2",
+    "com.coffeebean.tools": "https://github.com/Herschy0829/com.coffeebean.tools.git#v0.6.0",
+    "com.cysharp.memorypack": "https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack.Unity/Assets/MemoryPack.Unity#1.21.4"
   }
 }
 ```
 
-> `com.cysharp.memorypack` 仅**声明依赖**，来源由消费工程提供（git 或 file: 本地副本均可）。
+### ⚠️ MemoryPack 还需要单独提供 NuGet 产物（必读）
+
+**上面那条 git 引用只提供"胶水层"** —— 上游 `MemoryPack.Unity` 包内**只有** `Runtime/`（3 个文件）与 `package.json`，
+**不含** `MemoryPack.Core.dll`，也**不含** Roslyn 源生成器 `MemoryPack.Generator.dll`。
+而 `MemoryPack.Unity.asmdef` 里写着 `precompiledReferences: ["MemoryPack.Core.dll"]`，所以**必须**另外提供 NuGet 产物，二选一：
+
+| 方式 | 做法 |
+|---|---|
+| **A. NuGetForUnity（上游推荐）** | 引入 [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity)（本身也是 UPM 包），搜索 `MemoryPack` 安装 → 它会还原到 `Assets/Packages/` |
+| **B. 手动放置 NuGet 产物** | 把 `MemoryPack.Core.dll`（`lib/netstandard2.1/`）、`MemoryPack.Generator.dll`（`analyzers/dotnet/cs/`，其 `.meta` **必须**带 `RoslynAnalyzer` 标签）、以及依赖的 `System.Collections.Immutable.dll` / `System.Runtime.CompilerServices.Unsafe.dll` 放进工程（如 `Assets/Packages/`），并保留各自 `.meta` |
+
+**只做 git 引用会直接编译失败**（实测，一次 87 条错误）：
+
+```
+error CS0234: 命名空间 "MemoryPack" 中不存在类型或命名空间名 "Internal"
+error CS0246: 找不到类型或命名空间名 "MemoryPackFormatter<>" / "MemoryPackWriter<>" / "MemoryPackReader" / "PreserveAttribute"
+```
+
+即 `MemoryPack.Unity` 程序集编不出来 → 引用它的 `CoffeeBean.Save` 也编不出来。
+
+**如何确认生成器真的生效**：编译后 `Library/BuildPlayerData/Player/TypeDb-All.json` 里应能搜到
+`<你的类型>+<类型>Formatter`（例如 `PlayerData+PlayerDataFormatter`）—— 那是源生成器产出的嵌套类型，进入了程序集才说明它跑了。
+
+> 为什么不能把 DLL 直接塞进本模块：MemoryPack 的 Core 与生成器是 **NuGet 二进制 + 版本锁**，
+> 且生成器要作为 Roslyn analyzer 参与消费工程的编译；内嵌到 UPM 包里既会锁定版本，也拿不到正确的 analyzer 装配。故由消费工程提供。
 
 ## 快速使用
 
